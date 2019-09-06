@@ -1,12 +1,35 @@
+-- foundation
+
 module Main exposing (..)
 import Browser
+
+-- FE
+
 import Html exposing (Html, h1, h2, h3, h4, h5, img, br, div, text)
 import Html.Attributes exposing (src)
 import List
-main = Browser.sandbox { init = init, view = view, update = update }
+
+-- network
+
+import Http
+import Task exposing (Task)
+import Json.Decode as Decode
+
+
+main = Browser.element{ init = \() -> init, view = view, update = update, subscriptions = subscriptions }
 
 type alias Rover = {name: String, imageName: String, cameras: (List Camera)}
 type alias Camera = {name: String, abbr: String}
+
+type alias Model = {rover: Rover, currentSol: Int, latestSol: Int}
+type Msg = Inc | Dec 
+
+subscriptions: Model -> Sub msg
+subscriptions m = Sub.none
+  
+--, Cmd Msg 
+
+--Msg (Msg (Model, Cmd Msg))
 
 type2Cameras: (List Camera)
 type2Cameras = [ {name = "Front Hazard Avoidance Camera", abbr = "FHAZ"}
@@ -17,26 +40,17 @@ type2Cameras = [ {name = "Front Hazard Avoidance Camera", abbr = "FHAZ"}
                , {name = "Navigation Camera", abbr = "NAVCAM"}               
                ] 
 
-type1Cameras: (List Camera)
-type1Cameras = [ {name = "Front Hazard Avoidance Camera", abbr = "FHAZ"}
-               , {name = "Rear Hazard Avoidance Camera", abbr = "RHAZ"} 
-               , {name = "Mast Camera", abbr = "MAST"}
-               , {name = "Navigation Camera", abbr = "NAVCAM"}
-               , {name = "Panoramic Camera", abbr = "PANCAM"}
-               , {name = "Miniature Thermal Emission Spectrometer", abbr = "MINITES"} 
-               ]
+init: (Model, Cmd Msg)
+init = ({rover = {name = "Curiosity", imageName = "curiosity", cameras = type2Cameras}, currentSol = 0, latestSol = 0}
+       , Cmd.none
+       )
 
-init = { rovers = [ {name = "Curiosity", imageName = "curiosity", cameras = type2Cameras}
-                  ]
-       }
-
-type alias Model = {rovers: (List Rover)}
-type Msg = Update Model
-
+update: Msg -> Model -> (Model, Cmd Msg)
 update msg model = 
-    case Debug.log "msg" msg of 
-        Update new -> 
-            new
+    (model, Cmd.none)
+--    case msg of 
+--        Update (mo, ms) -> 
+--            (mo, Cmd.none)
 
 -- div for the camera image title, camera image subtitle, camera image
 
@@ -58,17 +72,16 @@ mappedRoverCameraHtml cameras = List.map roverCameraHtml cameras
 roverToHaytcheTeeEmEll: (List Camera) -> Html msg
 roverToHaytcheTeeEmEll cameras = div [] (mappedRoverCameraHtml cameras)
 
-roverHaytcheTeeEmElls: (List Rover) -> (List (Html msg))
-roverHaytcheTeeEmElls rovers = List.map roverToHaytcheTeeEmEll (List.map (\r -> r.cameras) rovers) 
+roverHaytcheTeeEmElls: Rover -> Html msg
+roverHaytcheTeeEmElls rover = roverToHaytcheTeeEmEll rover.cameras 
 
 title: Model -> String
 title a = 
-  case (List.head a.rovers) of 
-    Just rover -> rover.name
-    Nothing -> "-"
+  a.rover.name
 
+view: Model -> Html Msg
 view model =
-  div [] [h1 [] [text (title model)], div[] (roverHaytcheTeeEmElls model.rovers)]
+  div [] [h1 [] [text (title model)], div[] [(roverHaytcheTeeEmElls model.rover)]]
 --  case (List.head model.rovers) of
 --    Just rover -> div [] [ text rover.cameras ] -- pure hayche tee em el here --
 --    Nothing -> div [] [ text "----" ]
