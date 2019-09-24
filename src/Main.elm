@@ -7,55 +7,80 @@ import Browser
 
 import Html exposing (Html, h1, h2, h3, h4, h5, img, br, div, text)
 import Html.Attributes exposing (src)
-import List
+import List exposing (..)
 
 -- network
 
 import Http
-import Task exposing (Task)
-import Json.Decode as Decode
+import Json.Decode as Json
+import Json.Decode exposing (Decoder, field, map2, map3, string, list, dict, int, at)
 
+import Url exposing (..)
 
-main = Browser.element{ init = \() -> init, view = view, update = update, subscriptions = subscriptions }
-
-type alias Rover = {name: String, imageName: String, cameras: (List Camera)}
 type alias Camera = {name: String, abbr: String}
+type alias Rover = {name: String, cameras: (List Camera), maxSol: Int}
+type alias DataModel = {rover: Rover, currentSol: Int}
 
-type alias Model = {rover: Rover, currentSol: Int, latestSol: Int}
-type Msg = Inc | Dec 
+type Model = Empty
+           | Error String
+           | Loaded DataModel
+ 
+type Msg = FetchRover (Result Http.Error DataModel)
+         | FetchError Http.Error
 
 subscriptions: Model -> Sub msg
 subscriptions m = Sub.none
-  
---, Cmd Msg 
 
---Msg (Msg (Model, Cmd Msg))
-
-type2Cameras: (List Camera)
-type2Cameras = [ {name = "Front Hazard Avoidance Camera", abbr = "FHAZ"}
-               , {name = "Rear Hazard Avoidance Camera", abbr = "RHAZ"}
-               , {name = "Mast Camera", abbr = "MAST"}
-               , {name = "Chemistry and Camera Complex", abbr = "CHEMCAM"}
-               , {name = "Mars Hand Lens Imager", abbr = "MARDI"}
-               , {name = "Navigation Camera", abbr = "NAVCAM"}               
-               ] 
+bootUrl: String
+bootUrl = "https://mars-photos.herokuapp.com/api/v1/rovers/curiosity"
 
 init: (Model, Cmd Msg)
-init = ({rover = {name = "Curiosity", imageName = "curiosity", cameras = type2Cameras}, currentSol = 0, latestSol = 0}
-       , Cmd.none
-       )
+init = ( Empty 
+       , fetchCuriosity )
+
+main = Browser.element{ init = \() -> init, view = view, update = update, subscriptions = subscriptions }
+
+fetchCuriosity : Cmd Msg 
+fetchCuriosity =
+   Http.get { expect = Http.expectJson FetchRover roverEndpointDecoder, url = bootUrl }
+
+-- > {} Loaded DataModel
+-- > DataModel {rover: Rover, currentSol: Int, latestSol: Int}
+
+roverEndpointDecoder: Json.Decoder DataModel
+roverEndpointDecoder = 
+  map2 DataModel (map3 Rover (at ["rover", "name"] string) (at ["rover", "cameras"] (list cameraDecoder)) (at ["rover", "max_sol"] int)) (at ["rover", "max_sol"] int)
+
+-- "cameras"
+
+cameraDecoder: Json.Decoder Camera
+cameraDecoder = 
+  map2 Camera (field "full_name" string) (field "name" string) 
+  
+-- "rover": object
+-- max_sol: int
+-- 
 
 update: Msg -> Model -> (Model, Cmd Msg)
-update msg model = 
-    (model, Cmd.none)
---    case msg of 
---        Update (mo, ms) -> 
---            (mo, Cmd.none)
+update msg model =
+    case msg of
+      FetchRover result -> 
+        case result of
+          Ok m ->
+            (Loaded m, Cmd.none)
+          
+          Err _ ->
+            (Error "Big one", Cmd.none)
+  
+      FetchError error ->
+        case error of
+          Http.BadBody string ->
+            (Error string, Cmd.none)
+          _ -> 
+            (Error "Unknown error", Cmd.none)
 
 -- div for the camera image title, camera image subtitle, camera image
-
 -- https://mars-photos.herokuapp.com/api/v1/rovers/curiosity/latest_photos
-
 -- image url 
 
 roverCameraImg: String -> Html msg
@@ -75,30 +100,16 @@ roverToHaytcheTeeEmEll cameras = div [] (mappedRoverCameraHtml cameras)
 roverHaytcheTeeEmElls: Rover -> Html msg
 roverHaytcheTeeEmElls rover = roverToHaytcheTeeEmEll rover.cameras 
 
-title: Model -> String
+title: DataModel -> String
 title a = 
   a.rover.name
 
 view: Model -> Html Msg
-view model =
-  div [] [h1 [] [text (title model)], div[] [(roverHaytcheTeeEmElls model.rover)]]
---  case (List.head model.rovers) of
---    Just rover -> div [] [ text rover.cameras ] -- pure hayche tee em el here --
---    Nothing -> div [] [ text "----" ]
-
---Maybe a
-
---But I need a record with a name
-
--- page 1: 
-
--- show rover images and rover names
--- navigate to page 2:
-
--- page 2:
--- show rover images for the current date
--- display in this order: 
--- Name of current rover
--- Date time picker -- mm-dd-yyyy with + and - for m, d, y
--- Update images based on mm-dd-yyy with "today" as the current one
-
+view m = 
+  case m of 
+    Empty ->
+      text "Fetching.."
+    Error description -> 
+      text description
+    Loaded dataModel -> 
+      div [] [h1 [] [text dataModel.rover.name], (roverHaytcheTeeEmElls dataModel.rover)]
