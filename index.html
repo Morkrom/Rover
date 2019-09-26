@@ -4500,7 +4500,7 @@ var author$project$Main$FetchRover = function (a) {
 	return {$: 'FetchRover', a: a};
 };
 var author$project$Main$bootUrl = 'https://mars-photos.herokuapp.com/api/v1/rovers/curiosity';
-var author$project$Main$DataModel = F2(
+var author$project$Main$FetchRoverResult = F2(
 	function (rover, currentSol) {
 		return {currentSol: currentSol, rover: rover};
 	});
@@ -5059,7 +5059,7 @@ var elm$json$Json$Decode$list = _Json_decodeList;
 var elm$json$Json$Decode$map3 = _Json_map3;
 var author$project$Main$roverEndpointDecoder = A3(
 	elm$json$Json$Decode$map2,
-	author$project$Main$DataModel,
+	author$project$Main$FetchRoverResult,
 	A4(
 		elm$json$Json$Decode$map3,
 		author$project$Main$Rover,
@@ -5926,34 +5926,212 @@ var author$project$Main$Error = function (a) {
 var author$project$Main$Loaded = function (a) {
 	return {$: 'Loaded', a: a};
 };
+var author$project$Main$FetchCameras = function (a) {
+	return {$: 'FetchCameras', a: a};
+};
+var author$project$Main$Photo = F2(
+	function (cameraKey, photoUrl) {
+		return {cameraKey: cameraKey, photoUrl: photoUrl};
+	});
+var author$project$Main$photoDecoder = A3(
+	elm$json$Json$Decode$map2,
+	author$project$Main$Photo,
+	A2(
+		elm$json$Json$Decode$at,
+		_List_fromArray(
+			['camera', 'name']),
+		elm$json$Json$Decode$string),
+	A2(elm$json$Json$Decode$field, 'img_src', elm$json$Json$Decode$string));
+var author$project$Main$camerasEndpointDecoder = A2(
+	elm$json$Json$Decode$at,
+	_List_fromArray(
+		['photos']),
+	elm$json$Json$Decode$list(author$project$Main$photoDecoder));
+var author$project$Main$camerasUrl = function (sol) {
+	return 'https://mars-photos.herokuapp.com/api/v1/rovers/curiosity/photos?sol=' + elm$core$String$fromInt(sol);
+};
+var author$project$Main$fetchCameras = function (sol) {
+	return elm$http$Http$get(
+		{
+			expect: A2(elm$http$Http$expectJson, author$project$Main$FetchCameras, author$project$Main$camerasEndpointDecoder),
+			url: author$project$Main$camerasUrl(sol)
+		});
+};
+var elm$core$List$map = F2(
+	function (f, xs) {
+		return A3(
+			elm$core$List$foldr,
+			F2(
+				function (x, acc) {
+					return A2(
+						elm$core$List$cons,
+						f(x),
+						acc);
+				}),
+			_List_Nil,
+			xs);
+	});
+var author$project$Main$camKeyMap = function (list) {
+	return A2(
+		elm$core$List$map,
+		function (n) {
+			return _Utils_Tuple2(n.cameraKey, n);
+		},
+		list);
+};
+var elm$core$Maybe$withDefault = F2(
+	function (_default, maybe) {
+		if (maybe.$ === 'Just') {
+			var value = maybe.a;
+			return value;
+		} else {
+			return _default;
+		}
+	});
+var author$project$Main$deTupleAndFlatten = F3(
+	function (key, photo, streamHead) {
+		return A3(
+			elm$core$Dict$update,
+			key,
+			function (_n0) {
+				return elm$core$Maybe$Just(
+					_Utils_ap(
+						A2(
+							elm$core$Maybe$withDefault,
+							_List_Nil,
+							A2(elm$core$Dict$get, key, streamHead)),
+						_List_fromArray(
+							[photo])));
+			},
+			streamHead);
+	});
+var elm$core$Dict$foldl = F3(
+	function (func, acc, dict) {
+		foldl:
+		while (true) {
+			if (dict.$ === 'RBEmpty_elm_builtin') {
+				return acc;
+			} else {
+				var key = dict.b;
+				var value = dict.c;
+				var left = dict.d;
+				var right = dict.e;
+				var $temp$func = func,
+					$temp$acc = A3(
+					func,
+					key,
+					value,
+					A3(elm$core$Dict$foldl, func, acc, left)),
+					$temp$dict = right;
+				func = $temp$func;
+				acc = $temp$acc;
+				dict = $temp$dict;
+				continue foldl;
+			}
+		}
+	});
+var elm$core$Dict$fromList = function (assocs) {
+	return A3(
+		elm$core$List$foldl,
+		F2(
+			function (_n0, dict) {
+				var key = _n0.a;
+				var value = _n0.b;
+				return A3(elm$core$Dict$insert, key, value, dict);
+			}),
+		elm$core$Dict$empty,
+		assocs);
+};
+var author$project$Main$photoRoll = function (list) {
+	return A3(
+		elm$core$Dict$foldl,
+		author$project$Main$deTupleAndFlatten,
+		elm$core$Dict$empty,
+		elm$core$Dict$fromList(
+			author$project$Main$camKeyMap(list)));
+};
+var elm$core$Dict$diff = F2(
+	function (t1, t2) {
+		return A3(
+			elm$core$Dict$foldl,
+			F3(
+				function (k, v, t) {
+					return A2(elm$core$Dict$remove, k, t);
+				}),
+			t1,
+			t2);
+	});
+var author$project$Main$photoAlbum = F2(
+	function (dataModel, newPhotos) {
+		return A3(
+			elm$core$Dict$update,
+			dataModel.currentSol,
+			function (_n0) {
+				return elm$core$Maybe$Just(
+					A2(
+						elm$core$Dict$diff,
+						A2(
+							elm$core$Maybe$withDefault,
+							elm$core$Dict$empty,
+							A2(elm$core$Dict$get, dataModel.currentSol, dataModel.album)),
+						author$project$Main$photoRoll(newPhotos)));
+			},
+			dataModel.album);
+	});
 var elm$core$Platform$Cmd$batch = _Platform_batch;
 var elm$core$Platform$Cmd$none = elm$core$Platform$Cmd$batch(_List_Nil);
 var author$project$Main$update = F2(
 	function (msg, model) {
-		if (msg.$ === 'FetchRover') {
-			var result = msg.a;
-			if (result.$ === 'Ok') {
-				var m = result.a;
-				return _Utils_Tuple2(
-					author$project$Main$Loaded(m),
-					elm$core$Platform$Cmd$none);
-			} else {
-				return _Utils_Tuple2(
-					author$project$Main$Error('Big one'),
-					elm$core$Platform$Cmd$none);
-			}
-		} else {
-			var error = msg.a;
-			if (error.$ === 'BadBody') {
-				var string = error.a;
-				return _Utils_Tuple2(
-					author$project$Main$Error(string),
-					elm$core$Platform$Cmd$none);
-			} else {
-				return _Utils_Tuple2(
-					author$project$Main$Error('Unknown error'),
-					elm$core$Platform$Cmd$none);
-			}
+		switch (msg.$) {
+			case 'FetchRover':
+				var result = msg.a;
+				if (result.$ === 'Ok') {
+					var m = result.a;
+					return _Utils_Tuple2(
+						author$project$Main$Loaded(
+							{album: elm$core$Dict$empty, currentSol: m.currentSol, rover: m.rover}),
+						author$project$Main$fetchCameras(m.currentSol));
+				} else {
+					return _Utils_Tuple2(
+						author$project$Main$Error('Big one'),
+						elm$core$Platform$Cmd$none);
+				}
+			case 'FetchCameras':
+				var result = msg.a;
+				if (result.$ === 'Ok') {
+					var m = result.a;
+					if (model.$ === 'Loaded') {
+						var current = model.a;
+						return _Utils_Tuple2(
+							author$project$Main$Loaded(
+								_Utils_update(
+									current,
+									{
+										album: A2(author$project$Main$photoAlbum, current, m)
+									})),
+							elm$core$Platform$Cmd$none);
+					} else {
+						return _Utils_Tuple2(
+							author$project$Main$Error('Expected model to be loaded by now, only trying to modify an existing model\'s photo album'),
+							elm$core$Platform$Cmd$none);
+					}
+				} else {
+					return _Utils_Tuple2(
+						author$project$Main$Error('--'),
+						elm$core$Platform$Cmd$none);
+				}
+			default:
+				var error = msg.a;
+				if (error.$ === 'BadBody') {
+					var string = error.a;
+					return _Utils_Tuple2(
+						author$project$Main$Error(string),
+						elm$core$Platform$Cmd$none);
+				} else {
+					return _Utils_Tuple2(
+						author$project$Main$Error('Unknown error'),
+						elm$core$Platform$Cmd$none);
+				}
 		}
 	});
 var elm$json$Json$Decode$map = _Json_map1;
@@ -6024,20 +6202,6 @@ var author$project$Main$roverCameraHtml = function (c) {
 				A2(elm$html$Html$br, _List_Nil, _List_Nil)
 			]));
 };
-var elm$core$List$map = F2(
-	function (f, xs) {
-		return A3(
-			elm$core$List$foldr,
-			F2(
-				function (x, acc) {
-					return A2(
-						elm$core$List$cons,
-						f(x),
-						acc);
-				}),
-			_List_Nil,
-			xs);
-	});
 var author$project$Main$mappedRoverCameraHtml = function (cameras) {
 	return A2(elm$core$List$map, author$project$Main$roverCameraHtml, cameras);
 };
