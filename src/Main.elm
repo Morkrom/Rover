@@ -15,14 +15,14 @@ import String exposing (..)
 
 import Http
 import Json.Decode as Json
-import Json.Decode exposing (Decoder, field, map2, map3, string, list, dict, int, at)
+import Json.Decode exposing (Decoder, field, map2, map3, string, list, dict, int, at, succeed)
 
 import Url exposing (..)
 
 type alias Photo = {cameraKey: String, photoUrl: String}
 type alias Camera = {name: String, abbr: String}
 type alias Rover = {name: String, cameras: (List Camera), maxSol: Int}
-type alias DataModel = {rover: Rover, currentSol: Int, album: PhotoAlbum}
+type alias DataModel = {rover: Rover, currentSol: Int, album: PhotoAlbum, cams: (List Photo)}
 
 type alias Sol = Int
 type alias CameraKey = String
@@ -30,15 +30,14 @@ type alias PhotoRoll = Dict CameraKey (List Photo)
 type alias PhotoAlbum = Dict Sol PhotoRoll
 
 type alias FetchRoverResult = {rover: Rover, currentSol: Int}
-type alias FetchSolAlbumResult = List Photo
---store: 
--- << 'currentSol' did change
--- sol : [camera_key : [CameraData]]
--- > get sol: n, camera: camera_key  << "photos" : [{img_src: string}]
+
+-- (List String) is camera keys
+type alias FetchSolAlbumResult = { photos: (List Photo), remainingKeys: (List String) }
 
 type Model = Empty
            | Error String
-           | Loaded DataModel
+           | LoadedRover DataModel
+           | LoadedCamera DataModel
  
 type Msg = FetchRover (Result Http.Error FetchRoverResult)
          | FetchCameras (Result Http.Error FetchSolAlbumResult)
@@ -51,31 +50,34 @@ bootUrl: String
 bootUrl = "https://mars-photos.herokuapp.com/api/v1/rovers/curiosity"
 
 -- By Mars Sol
-camerasUrl: Int -> String 
-camerasUrl sol = "https://mars-photos.herokuapp.com/api/v1/rovers/curiosity/photos?sol=" ++ (fromInt sol) 
+camerasUrl: String -> Int -> String 
+camerasUrl key sol = "https://mars-photos.herokuapp.com/api/v1/rovers/curiosity/photos?sol=" ++ (fromInt sol) ++ "&camera=" ++ key 
 
 init: (Model, Cmd Msg)
 init = ( Empty 
        , fetchCuriosity )
 
-main = Browser.element{ init = \() -> init, view = view, update = update, subscriptions = subscriptions }
+main = Browser.element { init = \() -> init, view = view, update = update, subscriptions = subscriptions }
 
 fetchCuriosity : Cmd Msg
 fetchCuriosity =
    Http.get { expect = Http.expectJson FetchRover roverEndpointDecoder, url = bootUrl }
 
-fetchCameras: Int -> Cmd Msg
-fetchCameras sol =
-  Http.get { expect = Http.expectJson FetchCameras camerasEndpointDecoder, url = camerasUrl sol}
+fetchCameras: (List String) -> Int -> Cmd Msg
+fetchCameras cameraKeys sol =
+  case (List.head cameraKeys) of
+    Just h ->
+      Http.get { expect = Http.expectJson FetchCameras (camerasEndpointDecoder cameraKeys), url = camerasUrl h sol }
+    Nothing ->
+      Cmd.none  
 
 photoDecoder: Json.Decoder Photo 
 photoDecoder = 
   map2 Photo (at ["camera", "name"] string) (field "img_src" string)
 
-camerasEndpointDecoder: Json.Decoder FetchSolAlbumResult
-camerasEndpointDecoder =
-  at ["photos"] (list photoDecoder)
-  --  
+camerasEndpointDecoder: (List String) -> Json.Decoder FetchSolAlbumResult
+camerasEndpointDecoder cameraKeys =
+  map2 FetchSolAlbumResult (at ["photos"] (list photoDecoder)) (succeed cameraKeys) 
 
 roverEndpointDecoder: Json.Decoder FetchRoverResult
 roverEndpointDecoder = 
@@ -99,7 +101,15 @@ photoRoll list =
 
 photoAlbum: DataModel -> (List Photo) -> PhotoAlbum
 photoAlbum dataModel newPhotos =
-  Dict.update dataModel.currentSol (\_ -> Just (Dict.diff (Maybe.withDefault Dict.empty (Dict.get dataModel.currentSol dataModel.album)) (photoRoll newPhotos))) dataModel.album
+  Dict.insert dataModel.currentSol (Dict.union (photoRoll newPhotos) (Maybe.withDefault Dict.empty (Dict.get dataModel.currentSol dataModel.album))) dataModel.album
+
+loadCamera: Model -> (List String) -> Int -> ( Model, Cmd Msg)
+loadCamera model list sol =   
+  case list of
+    f::first ->
+      (model, fetchCameras (List.drop 1 list) sol)
+    _ ->
+      (model, Cmd.none)
 
 update: Msg -> Model -> (Model, Cmd Msg)
 update msg model =
@@ -107,17 +117,19 @@ update msg model =
       FetchRover result ->
         case result of
            Ok m ->
-             (Loaded {rover = m.rover, currentSol = m.currentSol, album = Dict.empty}, fetchCameras m.currentSol) 
+             loadCamera (LoadedRover {rover = m.rover, currentSol = m.currentSol, album = Dict.empty, cams = []}) ("-"::(List.map (\camera -> camera.abbr) m.rover.cameras)) m.currentSol 
            Err _ ->
              (Error "Big one", Cmd.none)   
       FetchCameras result ->
         case result of
           Ok m ->
-            case model of 
-              Loaded current ->
-                (Loaded { current | album = (photoAlbum current m)}, Cmd.none)
+            case model of
+              LoadedCamera current ->
+                (loadCamera (LoadedCamera { current | album = photoAlbum current m.photos, cams = m.photos}) m.remainingKeys current.currentSol)
+              LoadedRover initial ->
+                (loadCamera (LoadedCamera { initial | album = photoAlbum initial m.photos, cams = m.photos}) m.remainingKeys initial.currentSol)
               _ ->
-                (Error "Expected model to be loaded by now, only trying to modify an existing model's photo album", Cmd.none)
+                (Error "Error loading camera", Cmd.none)
           Err _ ->
             (Error "--", Cmd.none)
       FetchError error -> 
@@ -128,21 +140,33 @@ update msg model =
             (Error "Unknown error", Cmd.none)
 
 roverCameraImg: String -> Html msg
-roverCameraImg key = img [src "http://mars.jpl.nasa.gov/msl-raw-images/proj/msl/redops/ods/surface/sol/00000/opgs/edr/fcam/FRA_397502305EDR_D0010000AUT_04096M_.JPG"] []
+roverCameraImg key = img [src key] []
 
-roverCameraHtml: Camera -> Html msg
-roverCameraHtml c = div [] [h3 [] [text c.abbr], h5 [] [text c.name], roverCameraImg c.abbr, br [] []]
+roverCameraHtml: (Camera, (List Photo)) -> Html msg
+roverCameraHtml (c, l) = 
+  case List.head (List.reverse l) of
+    Just p ->
+      div [] [h3 [] [text c.abbr], h5 [] [text c.name], roverCameraImg p.photoUrl, br [] []]
+    Nothing ->
+      div [] [text ("where's the list?  " ++ "count: " ++ (fromInt (List.length l)))]
 
- -- load the image w given url
-
-mappedRoverCameraHtml: (List Camera) -> (List (Html msg))
+mappedRoverCameraHtml: (List (Camera, (List Photo))) -> (List (Html msg))
 mappedRoverCameraHtml cameras = List.map roverCameraHtml cameras
 
-roverToHaytcheTeeEmEll: (List Camera) -> Html msg
-roverToHaytcheTeeEmEll cameras = div [] (mappedRoverCameraHtml cameras)
+roverCamerasStack: (List (Camera, (List Photo))) -> Html msg
+roverCamerasStack cameras = div [] (mappedRoverCameraHtml cameras)
 
-roverHaytcheTeeEmElls: Rover -> Html msg
-roverHaytcheTeeEmElls rover = roverToHaytcheTeeEmEll rover.cameras 
+photosStack: Rover -> PhotoRoll -> Html msg
+photosStack rover roll = 
+  div [] [(text (fromInt (Dict.size roll))), roverCamerasStack (List.map (\c -> (c, Maybe.withDefault [] (Dict.get c.abbr roll))) rover.cameras)]
+-- cameras |> list of (Camera, (List Photo)) 
+-- roverCamerasStack rover.cameras 
+
+photosStackz: DataModel -> Html msg
+photosStackz dm = 
+  div [] [(text (fromInt (List.length dm.cams))), roverCamerasStack (List.map (\c -> (c, dm.cams)) dm.rover.cameras)]
+-- cameras |> list of (Camera, (List Photo)) 
+-- roverCamerasStack rover.cameras 
 
 title: DataModel -> String
 title a = 
@@ -155,5 +179,15 @@ view m =
       text "Fetching.."
     Error description -> 
       text description
-    Loaded dataModel -> 
-      div [] [h1 [] [text dataModel.rover.name], (roverHaytcheTeeEmElls dataModel.rover)]
+    LoadedRover dataModel ->
+      case Dict.get dataModel.currentSol dataModel.album of
+        Just booklet ->
+          div [] [h1 [] [text dataModel.rover.name], h4 [] [text (fromInt dataModel.currentSol)], (text "its just an empty booklet")]
+        Nothing ->
+          div [] [h1 [] [text dataModel.rover.name], h4 [] [text (fromInt dataModel.currentSol)], br [] [], (text "We're still loading albums")]
+    LoadedCamera dataModel ->
+       case Dict.get dataModel.currentSol dataModel.album of
+        Just booklet ->
+          div [] [h1 [] [text dataModel.rover.name], h4 [] [text (fromInt dataModel.currentSol)], (photosStack dataModel.rover booklet)]
+        Nothing ->
+          div [] [h1 [] [text dataModel.rover.name], h4 [] [text (fromInt dataModel.currentSol)], br [] [], (text "There was trouble loading an album for Sol")]     
