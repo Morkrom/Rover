@@ -73,19 +73,19 @@ fetchCameras cameraKeys sol =
 
 photoDecoder: Json.Decoder Photo 
 photoDecoder = 
-  map2 Photo (at ["camera", "name"] string) (field "img_src" string)
+  Json.map2 Photo (at ["camera", "name"] string) (field "img_src" string)
 
 camerasEndpointDecoder: (List String) -> Json.Decoder FetchSolAlbumResult
 camerasEndpointDecoder cameraKeys =
-  map2 FetchSolAlbumResult (at ["photos"] (list photoDecoder)) (succeed cameraKeys) 
+  Json.map2 FetchSolAlbumResult (at ["photos"] (list photoDecoder)) (succeed cameraKeys) 
 
 roverEndpointDecoder: Json.Decoder FetchRoverResult
 roverEndpointDecoder = 
-  map2 FetchRoverResult (map3 Rover (at ["rover", "name"] string) (at ["rover", "cameras"] (list cameraDecoder)) (at ["rover", "max_sol"] int)) (at ["rover", "max_sol"] int)
+  Json.map2 FetchRoverResult (Json.map3 Rover (at ["rover", "name"] string) (at ["rover", "cameras"] (list cameraDecoder)) (at ["rover", "max_sol"] int)) (at ["rover", "max_sol"] int)
 
 cameraDecoder: Json.Decoder Camera
 cameraDecoder = 
-  map2 Camera (field "full_name" string) (field "name" string) 
+  Json.map2 Camera (field "full_name" string) (field "name" string) 
 
 camKeyMap: (List Photo) -> (List (String, Photo))
 camKeyMap list = 
